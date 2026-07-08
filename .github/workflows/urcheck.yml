@@ -2,6 +2,12 @@ name: UR Check
 
 on:
   workflow_dispatch:
+    inputs:
+      force_alert:
+        description: "Send a test update email to MAIL_TO_ALERT"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "*/10 7-21 * * *"
       timezone: "Asia/Tokyo"
@@ -62,7 +68,12 @@ jobs:
           PY
 
       - name: Run monitor
-        run: python monitor_webpage.py --once
+        run: |
+          if [ "${{ inputs.force_alert }}" = "true" ]; then
+            python monitor_webpage.py --once --force-alert
+          else
+            python monitor_webpage.py --once
+          fi
 
       - name: Commit monitor state
         run: |

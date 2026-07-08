@@ -320,11 +320,20 @@ def check_once(previous_rooms: list[dict[str, str]] | None) -> list[dict[str, st
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="check once and exit")
+    parser.add_argument(
+        "--force-alert",
+        action="store_true",
+        help="treat all current rooms as new; intended for manual email tests",
+    )
     args = parser.parse_args()
 
     if args.once:
         now = now_local()
         previous_rooms = load_previous_rooms()
+        if args.force_alert:
+            print("Force alert enabled. Current rooms will be treated as newly added.")
+            previous_rooms = []
+
         current_rooms = check_once(previous_rooms)
         last_heartbeat_date = load_last_heartbeat_date()
         if should_send_heartbeat(now, last_heartbeat_date):
