@@ -4,7 +4,7 @@ import html
 import json
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -21,6 +21,7 @@ ACTIVE_END_HOUR = 22
 HEARTBEAT_HOUR = 9
 API_URL = "https://chintai.r6.ur-net.go.jp/chintai/api/bukken/detail/detail_bukken_room/"
 STATE_FILE = Path(__file__).with_name("monitor_state.json")
+LOCAL_TIMEZONE = timezone(timedelta(hours=9), "JST")
 ROOM_STATE_KEYS = {
     "id",
     "name",
@@ -215,17 +216,29 @@ def room_state_hash(rooms: list[dict[str, str]]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def load_previous_rooms() -> list[dict[str, str]] | None:
+def now_local() -> datetime:
+    return datetime.now(LOCAL_TIMEZONE)
+
+
+def read_state() -> dict:
     if not STATE_FILE.exists():
-        print(f"No state file found. A new baseline will be created: {STATE_FILE}")
-        return None
+        return {}
 
     try:
         state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         print(f"State file could not be read. A new baseline will be created: {error}")
+        return {}
+
+    return state if isinstance(state, dict) else {}
+
+
+def load_previous_rooms() -> list[dict[str, str]] | None:
+    if not STATE_FILE.exists():
+        print(f"No state file found. A new baseline will be created: {STATE_FILE}")
         return None
 
+    state = read_state()
     rooms = state.get("rooms")
     if not isinstance(rooms, list):
         print("State file has no rooms list. A new baseline will be created.")
@@ -239,13 +252,28 @@ def load_previous_rooms() -> list[dict[str, str]] | None:
     return rooms
 
 
-def save_rooms_state(rooms: list[dict[str, str]]) -> None:
+def load_last_heartbeat_date() -> date | None:
+    value = read_state().get("last_heartbeat_date")
+    if not isinstance(value, str) or not value:
+        return None
+
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        print("State file has an invalid last_heartbeat_date. Heartbeat may be sent again.")
+        return None
+
+
+def save_rooms_state(rooms: list[dict[str, str]], last_heartbeat_date: date | None = None) -> None:
     state = {
         "rooms": rooms,
         "hash": room_state_hash(rooms),
-        "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "checked_at": now_local().strftime("%Y-%m-%d %H:%M:%S"),
         "target_url": URL,
     }
+    if last_heartbeat_date is not None:
+        state["last_heartbeat_date"] = last_heartbeat_date.isoformat()
+
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Saved state: {len(rooms)} rooms -> {STATE_FILE}")
 
@@ -295,15 +323,25 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.once:
+        now = now_local()
         previous_rooms = load_previous_rooms()
         current_rooms = check_once(previous_rooms)
-        save_rooms_state(current_rooms)
+        last_heartbeat_date = load_last_heartbeat_date()
+        if should_send_heartbeat(now, last_heartbeat_date):
+            try:
+                send_heartbeat(now, current_rooms)
+                last_heartbeat_date = now.date()
+                print(now.strftime("%Y-%m-%d %H:%M:%S"), "Heartbeat email sent.")
+            except Exception as error:
+                print(now.strftime("%Y-%m-%d %H:%M:%S"), "Heartbeat email failed:", error)
+
+        save_rooms_state(current_rooms, last_heartbeat_date)
         return
 
     previous_rooms = None
     last_heartbeat_date = None
     while True:
-        now = datetime.now()
+        now = now_local()
         try:
             if should_send_heartbeat(now, last_heartbeat_date):
                 try:
@@ -315,7 +353,7 @@ def main() -> None:
 
             if is_active_time(now):
                 previous_rooms = check_once(previous_rooms)
-                save_rooms_state(previous_rooms)
+                save_rooms_state(previous_rooms, last_heartbeat_date)
             else:
                 print(
                     now.strftime("%Y-%m-%d %H:%M:%S"),
