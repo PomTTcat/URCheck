@@ -1,0 +1,74 @@
+name: UR Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 7-21 * * *"
+      timezone: "Asia/Tokyo"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ur-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Create email config
+        env:
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO_ALERT: ${{ secrets.MAIL_TO_ALERT }}
+          MAIL_TO_HEARTBEAT: ${{ secrets.MAIL_TO_HEARTBEAT }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          mail_to_alert = os.environ["MAIL_TO_ALERT"].strip()
+          if mail_to_alert.startswith("["):
+              mail_to_alert = json.loads(mail_to_alert)
+          else:
+              mail_to_alert = [item.strip() for item in mail_to_alert.split(",") if item.strip()]
+
+          config = {
+              "smtp_host": "smtp.gmail.com",
+              "smtp_port": 587,
+              "smtp_username": os.environ["SMTP_USERNAME"],
+              "smtp_password": os.environ["SMTP_PASSWORD"],
+              "mail_from": os.environ["MAIL_FROM"],
+              "mail_to_alert": mail_to_alert,
+              "mail_to_heartbeat": os.environ["MAIL_TO_HEARTBEAT"],
+              "use_tls": True,
+              "subject": "UR room list changed",
+          }
+
+          with open("email_config.json", "w", encoding="utf-8") as file:
+              json.dump(config, file, ensure_ascii=False, indent=2)
+              file.write("\n")
+          PY
+
+      - name: Run monitor
+        run: python monitor_webpage.py --once
+
+      - name: Commit monitor state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add monitor_state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update UR monitor state"
+          git push
