@@ -1,7 +1,19 @@
 {
-  "rooms": [],
-  "hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-  "checked_at": "2026-07-12 18:17:37",
+  "rooms": [
+    {
+      "id": "000508504",
+      "name": "5-8号棟504号室",
+      "rent": "68,000円",
+      "common_fee": "3,200円",
+      "layout": "2LDK",
+      "area": "52㎡",
+      "floor": "5階",
+      "floor_all": "5階",
+      "detail_url": "https://www.ur-net.go.jp/chintai/kanto/saitama/50_1310_room.html?JKSS=000508504"
+    }
+  ],
+  "hash": "8f569b84ecd86054dffb6998cd9fbf5fc274fabebdcd423bcaae6c272be480fc",
+  "checked_at": "2026-07-12 19:45:43",
   "target_url": "https://www.ur-net.go.jp/chintai/kanto/saitama/50_1310.html",
   "last_heartbeat_date": "2026-07-10"
 }
