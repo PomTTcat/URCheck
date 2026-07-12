@@ -168,7 +168,7 @@ def get_added_rooms(old_rooms: list[dict[str, str]], new_rooms: list[dict[str, s
 
 def build_added_message(added_rooms: list[dict[str, str]], current_rooms: list[dict[str, str]]) -> str:
     lines = [
-        f"New rooms found at: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"New rooms found at: {now_local().strftime('%Y-%m-%d %H:%M:%S')} JST",
         f"Target URL: {URL}",
         "",
         "Added rooms:",
@@ -293,7 +293,7 @@ def check_once(previous_rooms: list[dict[str, str]] | None) -> list[dict[str, st
         return current_rooms
 
     if rooms_are_same(previous_rooms, current_rooms):
-        print(time.strftime("%Y-%m-%d %H:%M:%S"), f"No change. Rooms: {len(current_rooms)}")
+        print(now_local().strftime("%Y-%m-%d %H:%M:%S"), f"No change. Rooms: {len(current_rooms)}")
         return previous_rooms
 
     added_rooms = get_added_rooms(previous_rooms, current_rooms)
@@ -310,7 +310,7 @@ def check_once(previous_rooms: list[dict[str, str]] | None) -> list[dict[str, st
             print("Email failed:", error)
     else:
         print(
-            time.strftime("%Y-%m-%d %H:%M:%S"),
+            now_local().strftime("%Y-%m-%d %H:%M:%S"),
             "Changed, but no new rooms. Email skipped.",
         )
 
@@ -369,7 +369,7 @@ def main() -> None:
                     f"Inactive window. Room check skipped until {ACTIVE_START_HOUR}:00.",
                 )
         except Exception as error:
-            print(time.strftime("%Y-%m-%d %H:%M:%S"), "Check failed:", error)
+            print(now_local().strftime("%Y-%m-%d %H:%M:%S"), "Check failed:", error)
 
         time.sleep(INTERVAL_SECONDS)
 
