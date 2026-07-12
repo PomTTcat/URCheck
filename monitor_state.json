@@ -1,19 +1,7 @@
 {
-  "rooms": [
-    {
-      "id": "000601306",
-      "name": "6-1号棟306号室",
-      "rent": "69,100円",
-      "common_fee": "3,200円",
-      "layout": "3DK",
-      "area": "52㎡",
-      "floor": "3階",
-      "floor_all": "5階",
-      "detail_url": "https://www.ur-net.go.jp/chintai/kanto/saitama/50_1310_room.html?JKSS=000601306"
-    }
-  ],
-  "hash": "9e5e1f51e69040ce04b63f8b7c2f1264338adfba46cdf2656aa341d20ab9b3f3",
-  "checked_at": "2026-07-12 13:36:12",
+  "rooms": [],
+  "hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "checked_at": "2026-07-12 16:11:48",
   "target_url": "https://www.ur-net.go.jp/chintai/kanto/saitama/50_1310.html",
   "last_heartbeat_date": "2026-07-10"
 }
