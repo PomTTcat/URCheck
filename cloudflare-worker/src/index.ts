@@ -70,7 +70,11 @@ export default {
       return jsonResponse({
         ok: true,
         service: "urcheck-monitor",
-        endpoints: ["/run?token=...", "/run?force_alert=true&token=..."],
+        endpoints: [
+          "/run?token=...",
+          "/run?force_alert=true&token=...",
+          "/run?force_heartbeat=true&token=...",
+        ],
       });
     }
 
@@ -84,9 +88,11 @@ export default {
     }
 
     const forceAlert = url.searchParams.get("force_alert") === "true";
+    const forceHeartbeat = url.searchParams.get("force_heartbeat") === "true";
     const result = await runMonitor(env, {
       forceAlert,
-      source: forceAlert ? "manual:force_alert" : "manual",
+      forceHeartbeat,
+      source: forceAlert ? "manual:force_alert" : forceHeartbeat ? "manual:force_heartbeat" : "manual",
     });
     return jsonResponse(result);
   },
@@ -94,13 +100,13 @@ export default {
 
 async function runMonitor(
   env: Env,
-  options: { forceAlert: boolean; source: string },
+  options: { forceAlert: boolean; forceHeartbeat?: boolean; source: string },
 ): Promise<MonitorResult> {
   const now = getJstParts();
   const state = await loadState(env);
   const previousRooms = options.forceAlert ? [] : state?.rooms ?? null;
 
-  if (!isActiveHour(env, now.hour) && !options.forceAlert) {
+  if (!isActiveHour(env, now.hour) && !options.forceAlert && !options.forceHeartbeat) {
     const message = `Inactive window at ${now.timestamp}. Room check skipped.`;
     console.log(message);
     return {
@@ -143,10 +149,12 @@ async function runMonitor(
 
   let lastHeartbeatDate = state?.last_heartbeat_date;
   let heartbeatSent = false;
-  if (shouldSendHeartbeat(env, now.hour, now.dateKey, lastHeartbeatDate)) {
+  if (options.forceHeartbeat || shouldSendHeartbeat(env, now.hour, now.dateKey, lastHeartbeatDate)) {
     const message = buildHeartbeatMessage(env, now.timestamp, currentRooms);
     await sendTelegramMessage(env, `[UR monitor heartbeat]\n\n${message}`);
-    lastHeartbeatDate = now.dateKey;
+    if (!options.forceHeartbeat) {
+      lastHeartbeatDate = now.dateKey;
+    }
     heartbeatSent = true;
     console.log("Telegram heartbeat sent.");
   }

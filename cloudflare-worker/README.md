@@ -19,9 +19,11 @@ It uses:
 ```text
 https://<your-worker>.<your-subdomain>.workers.dev/run?token=<MANUAL_RUN_TOKEN>
 https://<your-worker>.<your-subdomain>.workers.dev/run?force_alert=true&token=<MANUAL_RUN_TOKEN>
+https://<your-worker>.<your-subdomain>.workers.dev/run?force_heartbeat=true&token=<MANUAL_RUN_TOKEN>
 ```
 
 `force_alert=true` treats the current rooms as newly added and sends a test alert to Telegram.
+`force_heartbeat=true` sends a test heartbeat to Telegram without marking today's heartbeat as completed.
 
 ## Setup
 
