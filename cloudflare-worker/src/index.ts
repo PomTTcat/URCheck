@@ -33,7 +33,7 @@ type MonitorState = {
 };
 
 type MonitorResult = {
-  status: "baseline_created" | "no_change" | "changed" | "skipped";
+  status: "baseline_created" | "no_change" | "changed" | "error";
   rooms: number;
   added: number;
   heartbeatSent: boolean;
@@ -57,7 +57,7 @@ const ROOM_STATE_KEYS: Array<keyof Room> = [
 export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
-      runMonitor(env, {
+      runMonitorWithErrorReport(env, {
         forceAlert: false,
         source: `cron:${controller.cron}`,
       }),
@@ -74,8 +74,17 @@ export default {
           "/run?token=...",
           "/run?force_alert=true&token=...",
           "/run?force_heartbeat=true&token=...",
+          "/debug-run",
         ],
       });
+    }
+
+    if (url.pathname === "/debug-run") {
+      const result = await runMonitorWithErrorReport(env, {
+        forceAlert: false,
+        source: "debug-run",
+      });
+      return jsonResponse(result);
     }
 
     if (url.pathname !== "/run") {
@@ -89,7 +98,7 @@ export default {
 
     const forceAlert = url.searchParams.get("force_alert") === "true";
     const forceHeartbeat = url.searchParams.get("force_heartbeat") === "true";
-    const result = await runMonitor(env, {
+    const result = await runMonitorWithErrorReport(env, {
       forceAlert,
       forceHeartbeat,
       source: forceAlert ? "manual:force_alert" : forceHeartbeat ? "manual:force_heartbeat" : "manual",
@@ -98,6 +107,42 @@ export default {
   },
 };
 
+async function runMonitorWithErrorReport(
+  env: Env,
+  options: { forceAlert: boolean; forceHeartbeat?: boolean; source: string },
+): Promise<MonitorResult> {
+  try {
+    return await runMonitor(env, options);
+  } catch (error) {
+    const now = getJstParts();
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error("Monitor failed:", message);
+
+    try {
+      await sendTelegramMessage(
+        env,
+        [
+          "[UR monitor diagnostic error]",
+          "",
+          `Source: ${options.source}`,
+          `Time: ${now.timestamp}`,
+          `Error: ${message}`,
+        ].join("\n"),
+      );
+    } catch (telegramError) {
+      console.error("Telegram error report failed:", telegramError);
+    }
+
+    return {
+      status: "error",
+      rooms: 0,
+      added: 0,
+      heartbeatSent: false,
+      message: `${options.source} failed at ${now.timestamp}: ${message}`,
+    };
+  }
+}
+
 async function runMonitor(
   env: Env,
   options: { forceAlert: boolean; forceHeartbeat?: boolean; source: string },
@@ -105,18 +150,6 @@ async function runMonitor(
   const now = getJstParts();
   const state = await loadState(env);
   const previousRooms = options.forceAlert ? [] : state?.rooms ?? null;
-
-  if (!isActiveHour(env, now.hour) && !options.forceAlert && !options.forceHeartbeat) {
-    const message = `Inactive window at ${now.timestamp}. Room check skipped.`;
-    console.log(message);
-    return {
-      status: "skipped",
-      rooms: previousRooms?.length ?? 0,
-      added: 0,
-      heartbeatSent: false,
-      message,
-    };
-  }
 
   const currentRooms = await fetchRooms(env);
   let status: MonitorResult["status"] = "no_change";
@@ -134,18 +167,7 @@ async function runMonitor(
     addedRooms = getAddedRooms(previousRooms, currentRooms);
   }
 
-  if (addedRooms.length > 0) {
-    const message = buildAddedMessage(env, now.timestamp, addedRooms, currentRooms);
-    await sendTelegramMessage(
-      env,
-      `${options.forceAlert ? "[UR monitor test alert]" : "[UR new rooms found]"}\n\n${message}`,
-    );
-    console.log(`Telegram alert sent. Added rooms: ${addedRooms.length}`);
-  } else if (status === "changed") {
-    console.log("Room list changed, but no new rooms. Telegram alert skipped.");
-  } else {
-    console.log(`No new alert. Status: ${status}. Rooms: ${currentRooms.length}`);
-  }
+  console.log(`Diagnostic mode. Status: ${status}. Rooms: ${currentRooms.length}. Added: ${addedRooms.length}.`);
 
   let lastHeartbeatDate = state?.last_heartbeat_date;
   let heartbeatSent = false;
@@ -156,7 +178,7 @@ async function runMonitor(
       lastHeartbeatDate = now.dateKey;
     }
     heartbeatSent = true;
-    console.log("Telegram heartbeat sent.");
+    console.log("Heartbeat flag recorded.");
   }
 
   await saveState(env, {
@@ -166,6 +188,19 @@ async function runMonitor(
     target_url: env.TARGET_URL,
     ...(lastHeartbeatDate ? { last_heartbeat_date: lastHeartbeatDate } : {}),
   });
+
+  await sendTelegramMessage(
+    env,
+    buildDiagnosticMessage(env, {
+      source: options.source,
+      timestamp: now.timestamp,
+      status,
+      currentRooms,
+      addedRooms,
+      previousRoomCount: previousRooms?.length ?? null,
+      heartbeatSent,
+    }),
+  );
 
   return {
     status,
@@ -245,6 +280,9 @@ async function fetchRoomPage(env: Env, pageIndex: number): Promise<RawRoom[]> {
   }
 
   const data = await response.json<unknown>();
+  if (data === null) {
+    return [];
+  }
   if (!Array.isArray(data)) {
     throw new Error("UR API response was not a list.");
   }
@@ -355,6 +393,35 @@ function buildHeartbeatMessage(env: Env, timestamp: string, currentRooms: Room[]
     `Target URL: ${env.TARGET_URL}`,
     `Active check window: ${activeStartHour(env)}:00 - ${activeEndHour(env)}:00 JST`,
     `Current baseline rooms: ${currentRooms.length}`,
+  ].join("\n");
+}
+
+function buildDiagnosticMessage(
+  env: Env,
+  details: {
+    source: string;
+    timestamp: string;
+    status: MonitorResult["status"];
+    currentRooms: Room[];
+    addedRooms: Room[];
+    previousRoomCount: number | null;
+    heartbeatSent: boolean;
+  },
+): string {
+  return [
+    "[UR monitor diagnostic]",
+    "",
+    `Source: ${details.source}`,
+    `Time: ${details.timestamp}`,
+    `Status: ${details.status}`,
+    `Previous rooms: ${details.previousRoomCount ?? "none"}`,
+    `Current rooms: ${details.currentRooms.length}`,
+    `Added rooms: ${details.addedRooms.length}`,
+    `Heartbeat flag: ${details.heartbeatSent ? "yes" : "no"}`,
+    `Target URL: ${env.TARGET_URL}`,
+    "",
+    "Current rooms:",
+    formatRooms(details.currentRooms),
   ].join("\n");
 }
 
