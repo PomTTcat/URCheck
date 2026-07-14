@@ -33,7 +33,7 @@ type MonitorState = {
 };
 
 type MonitorResult = {
-  status: "baseline_created" | "no_change" | "changed" | "error";
+  status: "baseline_created" | "no_change" | "changed" | "skipped" | "error";
   rooms: number;
   added: number;
   heartbeatSent: boolean;
@@ -74,17 +74,8 @@ export default {
           "/run?token=...",
           "/run?force_alert=true&token=...",
           "/run?force_heartbeat=true&token=...",
-          "/debug-run",
         ],
       });
-    }
-
-    if (url.pathname === "/debug-run") {
-      const result = await runMonitorWithErrorReport(env, {
-        forceAlert: false,
-        source: "debug-run",
-      });
-      return jsonResponse(result);
     }
 
     if (url.pathname !== "/run") {
@@ -151,6 +142,18 @@ async function runMonitor(
   const state = await loadState(env);
   const previousRooms = options.forceAlert ? [] : state?.rooms ?? null;
 
+  if (!isActiveHour(env, now.hour) && !options.forceAlert && !options.forceHeartbeat) {
+    const message = `Inactive window at ${now.timestamp}. Room check skipped.`;
+    console.log(message);
+    return {
+      status: "skipped",
+      rooms: previousRooms?.length ?? 0,
+      added: 0,
+      heartbeatSent: false,
+      message,
+    };
+  }
+
   const currentRooms = await fetchRooms(env);
   let status: MonitorResult["status"] = "no_change";
   let addedRooms: Room[] = [];
@@ -167,7 +170,18 @@ async function runMonitor(
     addedRooms = getAddedRooms(previousRooms, currentRooms);
   }
 
-  console.log(`Diagnostic mode. Status: ${status}. Rooms: ${currentRooms.length}. Added: ${addedRooms.length}.`);
+  if (addedRooms.length > 0) {
+    const message = buildAddedMessage(env, now.timestamp, addedRooms, currentRooms);
+    await sendTelegramMessage(
+      env,
+      `${options.forceAlert ? "[UR monitor test alert]" : "[UR new rooms found]"}\n\n${message}`,
+    );
+    console.log(`Telegram alert sent. Added rooms: ${addedRooms.length}`);
+  } else if (status === "changed") {
+    console.log("Room list changed, but no new rooms. Telegram alert skipped.");
+  } else {
+    console.log(`No new alert. Status: ${status}. Rooms: ${currentRooms.length}`);
+  }
 
   let lastHeartbeatDate = state?.last_heartbeat_date;
   let heartbeatSent = false;
@@ -188,19 +202,6 @@ async function runMonitor(
     target_url: env.TARGET_URL,
     ...(lastHeartbeatDate ? { last_heartbeat_date: lastHeartbeatDate } : {}),
   });
-
-  await sendTelegramMessage(
-    env,
-    buildDiagnosticMessage(env, {
-      source: options.source,
-      timestamp: now.timestamp,
-      status,
-      currentRooms,
-      addedRooms,
-      previousRoomCount: previousRooms?.length ?? null,
-      heartbeatSent,
-    }),
-  );
 
   return {
     status,
@@ -393,35 +394,6 @@ function buildHeartbeatMessage(env: Env, timestamp: string, currentRooms: Room[]
     `Target URL: ${env.TARGET_URL}`,
     `Active check window: ${activeStartHour(env)}:00 - ${activeEndHour(env)}:00 JST`,
     `Current baseline rooms: ${currentRooms.length}`,
-  ].join("\n");
-}
-
-function buildDiagnosticMessage(
-  env: Env,
-  details: {
-    source: string;
-    timestamp: string;
-    status: MonitorResult["status"];
-    currentRooms: Room[];
-    addedRooms: Room[];
-    previousRoomCount: number | null;
-    heartbeatSent: boolean;
-  },
-): string {
-  return [
-    "[UR monitor diagnostic]",
-    "",
-    `Source: ${details.source}`,
-    `Time: ${details.timestamp}`,
-    `Status: ${details.status}`,
-    `Previous rooms: ${details.previousRoomCount ?? "none"}`,
-    `Current rooms: ${details.currentRooms.length}`,
-    `Added rooms: ${details.addedRooms.length}`,
-    `Heartbeat flag: ${details.heartbeatSent ? "yes" : "no"}`,
-    `Target URL: ${env.TARGET_URL}`,
-    "",
-    "Current rooms:",
-    formatRooms(details.currentRooms),
   ].join("\n");
 }
 
